@@ -1,0 +1,790 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>热量账本</title>
+<meta name="description" content="Jerry 的个人食物热量记录">
+<meta name="theme-color" content="#EDF1EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111714" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="热量账本">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<style>
+/* Layout: kitchen-scale readout on top of the day panel; month calendar beside it on wide screens, below on phones; food library on its own tab */
+:root {
+  --bg: #EDF1EC;
+  --surface: #FFFFFF;
+  --sunk: #E3E9E3;
+  --ink: #17231E;
+  --muted: #5B6962;
+  --line: #D2DAD3;
+  --accent: #2C6A4D;
+  --accent-ink: #FFFFFF;
+  --yolk: #C98A06;
+  --under: #A9C9B7;
+  --ok: #3E8A63;
+  --over: #C0462C;
+  --font-ui: -apple-system, "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-num: ui-monospace, "SF Mono", Menlo, "DM Mono", monospace;
+  --r: 10px;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111714; --surface: #19211D; --sunk: #222C27; --ink: #E4EBE6; --muted: #92A199;
+    --line: #2D3933; --accent: #6DBE92; --accent-ink: #0F1A14; --yolk: #EDB73C;
+    --under: #35584A; --ok: #5BAE82; --over: #E2714F; color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font-ui); font-size: 15px; line-height: 1.55;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-top: max(20px, env(safe-area-inset-top, 0px)); padding-bottom: max(48px, env(safe-area-inset-bottom, 0px));
+}
+[hidden] { display: none !important; }
+.wrap { max-width: 1120px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
+.num { font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+button, input, select { font: inherit; color: inherit; }
+input, select { font-size: 16px; } /* 16px stops iOS from zooming into fields */
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--yolk); outline-offset: 2px; }
+
+header.top { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 12px; }
+header.top h1 { margin: 0; font-size: 1.5rem; font-weight: 700; letter-spacing: .01em; }
+header.top h1 small { display: block; font-size: .78rem; font-weight: 400; color: var(--muted); letter-spacing: .04em; }
+.tabs { display: flex; gap: 4px; background: var(--sunk); border-radius: 999px; padding: 4px; }
+.tabs button { border: 0; background: transparent; padding: 6px 16px; border-radius: 999px; color: var(--muted); font-weight: 500; }
+.tabs button[aria-selected="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+
+.notice { background: var(--sunk); border-radius: var(--r); padding: 12px 14px; color: var(--muted); font-size: .9rem; }
+.notice.warn { color: var(--over); }
+
+.log-view { display: grid; gap: 18px; grid-template-columns: 1fr; }
+@media (min-width: 880px) { .log-view { grid-template-columns: minmax(0, 1fr) minmax(0, 370px); align-items: start; } }
+
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 18px; display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.panel h2 { margin: 0; font-size: 1rem; font-weight: 700; }
+.label { font-size: .74rem; letter-spacing: .08em; color: var(--muted); }
+
+.daynav { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.daynav .date { font-weight: 700; font-size: 1.05rem; flex: 1; min-width: 0; }
+.iconbtn { border: 1px solid var(--line); background: var(--surface); border-radius: 8px; width: 36px; height: 36px; display: grid; place-items: center; font-size: 1.1rem; line-height: 1; }
+.chipbtn { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 4px 12px; font-size: .85rem; }
+
+.readout { background: var(--sunk); border-radius: var(--r); padding: 16px; display: grid; gap: 10px; }
+.readout .big { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.readout .big b { font-family: var(--font-num); font-weight: 500; font-size: clamp(2.4rem, 9vw, 3.4rem); line-height: 1; letter-spacing: -.03em; }
+.readout .big span { color: var(--muted); font-family: var(--font-num); }
+.readout .goal { margin-left: auto; display: flex; align-items: center; gap: 6px; font-size: .85rem; color: var(--muted); }
+.readout .goal input { width: 84px; border: 1px solid var(--line); background: var(--surface); border-radius: 6px; padding: 2px 6px; font-family: var(--font-num); text-align: right; }
+.bar { height: 10px; background: var(--surface); border-radius: 999px; overflow: hidden; position: relative; }
+.bar i { position: absolute; inset: 0 auto 0 0; background: var(--ok); border-radius: 999px; transition: width .3s; }
+.bar i.over { background: var(--over); }
+.macros { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 8px; }
+.macros div { display: flex; flex-direction: column; }
+.macros b { font-family: var(--font-num); font-weight: 500; font-size: 1.05rem; }
+.macros span { font-size: .76rem; color: var(--muted); }
+.status-line { font-size: .88rem; color: var(--muted); }
+.status-line strong.over { color: var(--over); }
+.status-line strong.ok { color: var(--ok); }
+
+.addbox { display: grid; gap: 10px; border-top: 1px dashed var(--line); padding-top: 14px; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.row > * { min-width: 0; }
+.field { border: 1px solid var(--line); background: var(--surface); border-radius: 8px; padding: 8px 10px; width: 100%; }
+select.field { width: auto; }
+.picker { position: relative; flex: 1 1 200px; }
+.dropdown { position: absolute; z-index: 5; top: calc(100% + 4px); left: 0; right: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.14); max-height: 280px; overflow-y: auto; }
+.dropdown button { display: flex; width: 100%; justify-content: space-between; gap: 10px; border: 0; background: transparent; text-align: left; padding: 10px 12px; }
+.dropdown button.hl { background: var(--sunk); }
+.dropdown .empty { padding: 10px 12px; color: var(--muted); font-size: .88rem; }
+.quick { display: flex; flex-wrap: wrap; gap: 6px; }
+.quick button { border: 1px solid var(--line); background: var(--bg); border-radius: 999px; padding: 4px 11px; font-size: .85rem; }
+.quick button.on { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); }
+.amt { display: flex; gap: 6px; flex: 0 1 auto; }
+.amt input { width: 96px; }
+.preview { font-size: .88rem; color: var(--muted); flex: 1; min-width: 130px; }
+.preview b { color: var(--ink); font-family: var(--font-num); font-weight: 500; }
+.primary { border: 0; background: var(--accent); color: var(--accent-ink); border-radius: 8px; padding: 9px 18px; font-weight: 700; }
+.primary:disabled { opacity: .45; cursor: not-allowed; }
+.ghost { border: 1px solid var(--line); background: transparent; border-radius: 8px; padding: 8px 14px; }
+
+.meal { display: grid; gap: 4px; }
+.meal h3 { margin: 0; display: flex; justify-content: space-between; font-size: .86rem; font-weight: 700; color: var(--muted); }
+.meal h3 .num { font-weight: 500; }
+.entry { display: grid; grid-template-columns: minmax(0,1fr) auto auto auto; gap: 10px; align-items: center; padding: 7px 0; border-bottom: 1px solid var(--line); }
+.entry:last-child { border-bottom: 0; }
+.entry .nm { overflow-wrap: anywhere; }
+.entry .nm small { display: block; color: var(--muted); font-size: .76rem; }
+.entry .gw { display: flex; align-items: center; gap: 3px; color: var(--muted); }
+.entry input { width: 70px; border: 1px solid transparent; background: var(--sunk); border-radius: 6px; padding: 3px 6px; text-align: right; font-family: var(--font-num); color: var(--ink); }
+.entry .k { font-family: var(--font-num); min-width: 54px; text-align: right; }
+.entry .x { border: 0; background: transparent; color: var(--muted); font-size: 1.2rem; padding: 2px 8px; border-radius: 6px; }
+.empty-state { color: var(--muted); font-size: .9rem; padding: 6px 0; }
+
+.cal-head { display: flex; align-items: center; gap: 8px; }
+.cal-head h2 { flex: 1; }
+.cal { display: grid; grid-template-columns: repeat(7, minmax(0,1fr)); gap: 4px; }
+.cal .dow { text-align: center; font-size: .72rem; color: var(--muted); padding-bottom: 2px; }
+.cell { aspect-ratio: 1 / 1.05; max-width: 100%; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); padding: 4px; display: flex; flex-direction: column; justify-content: space-between; text-align: left; position: relative; overflow: hidden; }
+.cell .d { font-size: .74rem; color: var(--muted); }
+.cell .v { font-family: var(--font-num); font-size: .68rem; line-height: 1.1; }
+.cell .fill { position: absolute; left: 0; right: 0; bottom: 0; z-index: 0; }
+.cell > span { position: relative; z-index: 1; }
+.cell.under .fill { background: var(--under); }
+.cell.ok .fill { background: var(--ok); opacity: .35; }
+.cell.over .fill { background: var(--over); opacity: .35; }
+.cell.today .d { color: var(--accent); font-weight: 700; }
+.cell.sel { border-color: var(--ink); border-width: 2px; padding: 3px; }
+.cell.pad { visibility: hidden; }
+.legend { display: flex; gap: 12px; flex-wrap: wrap; font-size: .76rem; color: var(--muted); }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 4px; vertical-align: -1px; }
+.stats { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 8px; border-top: 1px dashed var(--line); padding-top: 12px; }
+.stats b { display: block; font-family: var(--font-num); font-weight: 500; font-size: 1.1rem; }
+.stats span { font-size: .76rem; color: var(--muted); }
+
+.foods-view { display: grid; gap: 18px; grid-template-columns: 1fr; }
+@media (min-width: 880px) { .foods-view { grid-template-columns: minmax(0,1fr) minmax(0,400px); align-items: start; } }
+.side { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.ftable-wrap { overflow-x: auto; }
+table.ftable { width: 100%; border-collapse: collapse; font-size: .9rem; }
+.ftable th { text-align: left; font-weight: 500; font-size: .74rem; color: var(--muted); padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.ftable td { padding: 9px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.ftable td.n { font-family: var(--font-num); text-align: right; white-space: nowrap; }
+.ftable th.n { text-align: right; }
+.ftable tr { cursor: pointer; }
+.tag { display: inline-block; font-size: .7rem; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; margin-left: 6px; }
+.tag.pk { border-color: var(--yolk); color: var(--yolk); }
+.form { display: grid; gap: 12px; }
+.form label { display: grid; gap: 4px; font-size: .84rem; color: var(--muted); }
+.form label .en { font-size: .72rem; opacity: .8; }
+.grid2 { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; }
+.grid3 { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 10px; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { border: 0; background: transparent; padding: 7px 12px; font-size: .86rem; color: var(--muted); }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+.msg { font-size: .85rem; min-height: 1.2em; }
+.msg.err { color: var(--over); }
+.msg.good { color: var(--ok); }
+.calc { font-size: .85rem; color: var(--muted); }
+.calc b { font-family: var(--font-num); color: var(--ink); font-weight: 500; }
+.danger { border: 1px solid var(--over); color: var(--over); background: transparent; border-radius: 8px; padding: 8px 14px; }
+.danger.armed { background: var(--over); color: var(--surface); }
+.backup p { margin: 0; font-size: .85rem; color: var(--muted); }
+.backup input[type=file] { display: none; }
+.backup label.ghost { display: inline-block; cursor: pointer; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; scroll-behavior: auto !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>热量账本<small>天然食物用平均值 · 加工食品按营养表</small></h1>
+    <div class="tabs" role="tablist">
+      <button id="tab-log" role="tab" aria-selected="true">记录</button>
+      <button id="tab-foods" role="tab" aria-selected="false">食物库</button>
+    </div>
+  </header>
+
+  <div id="notice" class="notice" hidden></div>
+
+  <section id="view-log" class="log-view">
+    <div class="panel" id="day-panel">
+      <div class="daynav">
+        <button class="iconbtn" id="prev-day" aria-label="前一天">‹</button>
+        <div class="date" id="day-label">—</div>
+        <button class="iconbtn" id="next-day" aria-label="后一天">›</button>
+        <button class="chipbtn" id="go-today">今天</button>
+      </div>
+
+      <div class="readout">
+        <div class="big">
+          <b id="tot-kcal">0</b><span>kcal</span>
+          <div class="goal"><label for="goal">目标</label><input id="goal" type="number" inputmode="numeric" min="500" max="6000" step="50" value="2000"><span>kcal</span></div>
+        </div>
+        <div class="bar"><i id="bar" style="width:0%"></i></div>
+        <div class="status-line" id="status-line">还没有记录</div>
+        <div class="macros">
+          <div><b id="tot-p">0</b><span>蛋白质 Protein</span></div>
+          <div><b id="tot-f">0</b><span>脂肪 Fat</span></div>
+          <div><b id="tot-c">0</b><span>碳水 Carbs</span></div>
+        </div>
+      </div>
+
+      <div class="addbox">
+        <div class="label">添加食物</div>
+        <div class="quick" id="quick"></div>
+        <div class="row">
+          <select class="field" id="meal" aria-label="餐次">
+            <option value="breakfast">早餐</option>
+            <option value="lunch">午餐</option>
+            <option value="dinner">晚餐</option>
+            <option value="snack">加餐</option>
+          </select>
+          <div class="picker">
+            <input class="field" id="food-q" placeholder="搜索食物库…" autocomplete="off" aria-label="搜索食物">
+            <div class="dropdown" id="dropdown" hidden></div>
+          </div>
+        </div>
+        <div class="row">
+          <div class="amt">
+            <input class="field num" id="amt" type="number" inputmode="decimal" min="0" step="any" placeholder="重量" aria-label="数量">
+            <select class="field" id="unit" aria-label="单位"><option value="g">克 g</option></select>
+          </div>
+          <div class="preview" id="preview">先选一种食物</div>
+          <button class="primary" id="add-btn" disabled>添加</button>
+        </div>
+        <div class="row"><button class="ghost" id="copy-prev" hidden></button></div>
+      </div>
+
+      <div id="entries"></div>
+    </div>
+
+    <div class="panel" id="cal-panel">
+      <div class="cal-head">
+        <button class="iconbtn" id="prev-month" aria-label="上个月">‹</button>
+        <h2 id="month-label">—</h2>
+        <button class="iconbtn" id="next-month" aria-label="下个月">›</button>
+      </div>
+      <div class="cal" id="cal"></div>
+      <div class="legend">
+        <span><i style="background:var(--under)"></i>低于目标 90%</span>
+        <span><i style="background:var(--ok);opacity:.5"></i>目标 ±10%</span>
+        <span><i style="background:var(--over);opacity:.5"></i>超过 110%</span>
+      </div>
+      <div class="stats">
+        <div><b id="st-days">0</b><span>记录天数</span></div>
+        <div><b id="st-avg">—</b><span>日均 kcal</span></div>
+        <div><b id="st-over">0</b><span>超标天数</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="view-foods" class="foods-view" hidden>
+    <div class="panel">
+      <div class="row" style="justify-content:space-between">
+        <h2>食物库 <span class="num" id="food-count" style="color:var(--muted);font-weight:400"></span></h2>
+        <input class="field" id="lib-q" placeholder="筛选…" style="max-width:200px" aria-label="筛选食物库">
+      </div>
+      <div class="ftable-wrap">
+        <table class="ftable">
+          <thead><tr><th>名称</th><th class="n">kcal/100g</th><th class="n">蛋白</th><th class="n">脂肪</th><th class="n">碳水</th><th class="n">每份</th></tr></thead>
+          <tbody id="ftbody"></tbody>
+        </table>
+      </div>
+      <div class="empty-state" id="lib-empty" hidden>食物库是空的，在下面添加第一种食物。</div>
+    </div>
+
+    <div class="side">
+      <div class="panel">
+        <h2 id="form-title">新增食物</h2>
+        <form class="form" id="food-form" novalidate>
+          <input type="hidden" id="f-id">
+          <label>名称<input class="field" id="f-name" required placeholder="例如：熟鸡胸肉 / Woolworths 希腊酸奶"></label>
+          <div class="seg" role="group" aria-label="类型">
+            <button type="button" id="k-natural" aria-pressed="true">天然食物（均值）</button>
+            <button type="button" id="k-packaged" aria-pressed="false">加工食品（营养表）</button>
+          </div>
+          <div class="grid2">
+            <label>能量 Energy / 100g<input class="field num" id="f-energy" type="number" step="any" min="0" inputmode="decimal"></label>
+            <label>单位<span class="seg" role="group" aria-label="能量单位">
+              <button type="button" id="u-kcal" aria-pressed="true">kcal</button>
+              <button type="button" id="u-kj" aria-pressed="false">kJ</button>
+            </span></label>
+          </div>
+          <div class="calc" id="kj-calc" hidden></div>
+          <div class="grid3">
+            <label>蛋白质 <span class="en">Protein g</span><input class="field num" id="f-p" type="number" step="any" min="0" inputmode="decimal"></label>
+            <label>脂肪 <span class="en">Fat, total g</span><input class="field num" id="f-f" type="number" step="any" min="0" inputmode="decimal"></label>
+            <label>碳水 <span class="en">Carbohydrate g</span><input class="field num" id="f-c" type="number" step="any" min="0" inputmode="decimal"></label>
+          </div>
+          <label>每份重量 <span class="en">Serving size g（可选，填了就能按“份”记录）</span><input class="field num" id="f-serv" type="number" step="any" min="0" inputmode="decimal"></label>
+          <label>备注<input class="field" id="f-note" placeholder="例如：生重 / 熟重 / 品牌"></label>
+          <div class="msg" id="form-msg"></div>
+          <div class="row">
+            <button class="primary" type="submit">保存到食物库</button>
+            <button class="ghost" type="button" id="f-cancel" hidden>取消编辑</button>
+            <button class="danger" type="button" id="f-del" hidden>删除</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="panel backup">
+        <h2>备份</h2>
+        <p>数据只存在这台手机上。隔一段时间导出一次备份，存到“文件”或发给自己；换手机或误删 app 后可以用备份恢复。</p>
+        <div class="row">
+          <button class="primary" id="export-btn" type="button">导出备份</button>
+          <label class="ghost" for="import-file">从备份恢复</label>
+          <input type="file" id="import-file" accept="application/json,.json">
+        </div>
+        <div class="msg" id="backup-msg"></div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const MEALS = [["breakfast","早餐"],["lunch","午餐"],["dinner","晚餐"],["snack","加餐"]];
+  const pad = (n) => String(n).padStart(2, "0");
+  const ymd = (d) => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+  const parseYmd = (s) => { const [y,m,d] = s.split("-").map(Number); return new Date(y, m-1, d); };
+  const todayStr = () => ymd(new Date());
+  const addDays = (s, n) => { const d = parseYmd(s); d.setDate(d.getDate()+n); return ymd(d); };
+  const r0 = (x) => Math.round(x || 0);
+  const r1 = (x) => Math.round((x || 0) * 10) / 10;
+  const fmt = (x) => r0(x).toLocaleString("en-AU");
+  const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+  const num = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? n : null; };
+  const WEEK = ["日","一","二","三","四","五","六"];
+
+  // ---------- local store (localStorage, one JSON blob) ----------
+  const KEY = "kcal-ledger-v1";
+  const SEED_FOODS = [{"id": "n-apple", "carbs": 14, "createdAt": 1792298400000, "fat": 0.2, "kcal": 52, "kind": "natural", "name": "苹果", "note": "带皮可食部分", "protein": 0.3, "serving": 180}, {"id": "n-banana", "carbs": 23, "createdAt": 1792298400000, "fat": 0.3, "kcal": 89, "kind": "natural", "name": "香蕉", "note": "去皮重；1 份 ≈ 1 根中等", "protein": 1.1, "serving": 120}, {"id": "n-beef-lean-cooked", "carbs": 0, "createdAt": 1792298400000, "fat": 12, "kcal": 217, "kind": "natural", "name": "瘦牛肉（熟）", "note": "牛排/瘦肉熟重", "protein": 26, "serving": null}, {"id": "n-broccoli", "carbs": 6.6, "createdAt": 1792298400000, "fat": 0.4, "kcal": 34, "kind": "natural", "name": "西兰花", "note": "生重", "protein": 2.8, "serving": null}, {"id": "n-chicken-breast-cooked", "carbs": 0, "createdAt": 1792298400000, "fat": 3.6, "kcal": 165, "kind": "natural", "name": "鸡胸肉（熟）", "note": "去皮，烤/煮熟重", "protein": 31, "serving": null}, {"id": "n-chicken-thigh-cooked", "carbs": 0, "createdAt": 1792298400000, "fat": 8.5, "kcal": 180, "kind": "natural", "name": "鸡腿肉（熟，去皮）", "note": "去骨去皮熟重", "protein": 25, "serving": null}, {"id": "n-egg", "carbs": 0.7, "createdAt": 1792298400000, "fat": 9.5, "kcal": 143, "kind": "natural", "name": "鸡蛋", "note": "去壳重；1 份 ≈ 1 个中号蛋", "protein": 12.6, "serving": 50}, {"id": "n-milk-full", "carbs": 4.8, "createdAt": 1792298400000, "fat": 3.5, "kcal": 64, "kind": "natural", "name": "全脂牛奶", "note": "1mL 按 1g；1 份 = 250mL", "protein": 3.3, "serving": 250}, {"id": "n-oats", "carbs": 67, "createdAt": 1792298400000, "fat": 6.5, "kcal": 379, "kind": "natural", "name": "燕麦片（干）", "note": "干重", "protein": 13, "serving": 40}, {"id": "n-olive-oil", "carbs": 0, "createdAt": 1792298400000, "fat": 100, "kcal": 884, "kind": "natural", "name": "食用油", "note": "橄榄油/植物油；1 份 ≈ 1 汤匙", "protein": 0, "serving": 10}, {"id": "n-pork-lean-cooked", "carbs": 0, "createdAt": 1792298400000, "fat": 3.5, "kcal": 143, "kind": "natural", "name": "猪里脊（熟）", "note": "熟重", "protein": 26, "serving": null}, {"id": "n-potato", "carbs": 17, "createdAt": 1792298400000, "fat": 0.1, "kcal": 77, "kind": "natural", "name": "土豆（生）", "note": "生重", "protein": 2, "serving": null}, {"id": "n-rice-cooked", "carbs": 28, "createdAt": 1792298400000, "fat": 0.3, "kcal": 130, "kind": "natural", "name": "米饭（熟）", "note": "白米饭熟重，均值", "protein": 2.7, "serving": null}, {"id": "n-rice-raw", "carbs": 79, "createdAt": 1792298400000, "fat": 0.6, "kcal": 360, "kind": "natural", "name": "大米（生）", "note": "白米生重，均值", "protein": 7, "serving": null}, {"id": "n-salmon-cooked", "carbs": 0, "createdAt": 1792298400000, "fat": 12, "kcal": 206, "kind": "natural", "name": "三文鱼（熟）", "note": "养殖，熟重", "protein": 22, "serving": null}, {"id": "n-sweet-potato", "carbs": 20, "createdAt": 1792298400000, "fat": 0.1, "kcal": 86, "kind": "natural", "name": "红薯（生）", "note": "生重", "protein": 1.6, "serving": null}];
+  const Store = {
+    load() {
+      try {
+        const raw = localStorage.getItem(KEY);
+        if (raw) {
+          const d = JSON.parse(raw);
+          return { foods: d.foods || [], days: d.days || {}, goal: d.goal || 2000 };
+        }
+      } catch (e) { warn("读取本地数据失败：" + e.message); }
+      return { foods: SEED_FOODS.map(f => ({ ...f })), days: {}, goal: 2000 };
+    },
+    save() {
+      try {
+        localStorage.setItem(KEY, JSON.stringify({ version: 1, foods: S.foods, days: S.days, goal: S.goal, savedAt: Date.now() }));
+      } catch (e) { warn("保存失败，手机存储空间可能不足。请先导出备份。"); }
+    },
+  };
+  function warn(text) { const n = $("notice"); n.hidden = false; n.className = "notice warn"; n.textContent = text; }
+
+  const S = { foods: [], days: {}, goal: 2000, sel: todayStr(), month: null, pick: null, form: { kind: "natural", eunit: "kcal" }, hl: -1 };
+  Object.assign(S, Store.load());
+  S.month = (() => { const d = new Date(); return { y: d.getFullYear(), m: d.getMonth() }; })();
+
+  // ask the browser not to evict our storage (best effort)
+  if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+
+  // ---------- derived ----------
+  function totals(entries) {
+    const t = { kcal: 0, protein: 0, fat: 0, carbs: 0 };
+    for (const e of entries) { t.kcal += e.kcal || 0; t.protein += e.protein || 0; t.fat += e.fat || 0; t.carbs += e.carbs || 0; }
+    return { kcal: r0(t.kcal), protein: r1(t.protein), fat: r1(t.fat), carbs: r1(t.carbs) };
+  }
+  function entryFrom(per, grams) {
+    const k = grams / 100;
+    return { grams: r1(grams), kcal: r1(per.kcal * k), protein: r1(per.protein * k), fat: r1(per.fat * k), carbs: r1(per.carbs * k) };
+  }
+  function dayEntries(date) { return (S.days[date] && S.days[date].entries) || []; }
+  function frequentFoods() {
+    const count = {};
+    for (const d of Object.values(S.days)) for (const e of d.entries || []) count[e.foodId] = (count[e.foodId] || 0) + 1;
+    const byId = Object.fromEntries(S.foods.map(f => [f.id, f]));
+    const top = Object.entries(count).sort((a,b) => b[1]-a[1]).map(([id]) => byId[id]).filter(Boolean);
+    for (const f of S.foods) { if (top.length >= 10) break; if (!top.includes(f)) top.push(f); }
+    return top.slice(0, 10);
+  }
+  function saveDay(date, entries) {
+    if (entries.length) S.days[date] = { date, entries, totals: totals(entries), updatedAt: Date.now() };
+    else delete S.days[date];
+    Store.save();
+    renderDay(); renderCal();
+  }
+
+  // ---------- day panel ----------
+  function renderDay() {
+    const d = parseYmd(S.sel);
+    const isToday = S.sel === todayStr();
+    $("day-label").textContent = `${d.getMonth()+1}月${d.getDate()}日 周${WEEK[d.getDay()]}${isToday ? " · 今天" : ""}`;
+    $("go-today").hidden = isToday;
+    const entries = dayEntries(S.sel);
+    const t = totals(entries);
+    $("tot-kcal").textContent = fmt(t.kcal);
+    $("tot-p").textContent = t.protein + " g"; $("tot-f").textContent = t.fat + " g"; $("tot-c").textContent = t.carbs + " g";
+    if (document.activeElement !== $("goal")) $("goal").value = S.goal;
+    const ratio = S.goal ? t.kcal / S.goal : 0;
+    $("bar").style.width = Math.min(100, ratio * 100) + "%";
+    $("bar").classList.toggle("over", ratio > 1.1);
+    const sl = $("status-line");
+    if (!entries.length) sl.textContent = "这一天还没有记录";
+    else if (t.kcal <= S.goal) sl.innerHTML = `还剩 <strong class="ok num">${fmt(S.goal - t.kcal)}</strong> kcal · 已达成 ${r0(ratio*100)}%`;
+    else sl.innerHTML = `超出 <strong class="over num">${fmt(t.kcal - S.goal)}</strong> kcal · ${r0(ratio*100)}%`;
+
+    const box = $("entries");
+    box.textContent = "";
+    if (!entries.length) {
+      const p = document.createElement("div"); p.className = "empty-state";
+      p.textContent = S.foods.length ? "在上面选食物、填重量，点“添加”。" : "先去“食物库”添加你常吃的食物。";
+      box.append(p);
+    }
+    for (const [mk, mn] of MEALS) {
+      const list = entries.filter(e => (e.meal || "snack") === mk);
+      if (!list.length) continue;
+      const sec = document.createElement("div"); sec.className = "meal";
+      const h = document.createElement("h3");
+      const h1 = document.createElement("span"); h1.textContent = mn;
+      const h2 = document.createElement("span"); h2.className = "num"; h2.textContent = fmt(totals(list).kcal) + " kcal";
+      h.append(h1, h2); sec.append(h);
+      for (const e of list) {
+        const row = document.createElement("div"); row.className = "entry";
+        const nm = document.createElement("div"); nm.className = "nm"; nm.textContent = e.name;
+        const sm = document.createElement("small"); sm.textContent = `P ${r1(e.protein)} · F ${r1(e.fat)} · C ${r1(e.carbs)}`;
+        nm.append(sm);
+        const gw = document.createElement("div"); gw.className = "gw";
+        const g = document.createElement("input");
+        g.type = "number"; g.step = "any"; g.min = "0"; g.inputMode = "decimal"; g.value = e.grams; g.id = "g-" + e.id; g.setAttribute("aria-label", e.name + " 克数");
+        g.addEventListener("change", () => {
+          const grams = num(g.value);
+          if (grams == null || grams <= 0) { g.value = e.grams; return; }
+          saveDay(S.sel, dayEntries(S.sel).map(x => x.id === e.id ? { ...x, ...entryFrom(x.per, grams) } : x));
+        });
+        const gl = document.createElement("span"); gl.textContent = "g";
+        gw.append(g, gl);
+        const k = document.createElement("div"); k.className = "k"; k.textContent = fmt(e.kcal);
+        const x = document.createElement("button"); x.className = "x"; x.textContent = "×"; x.setAttribute("aria-label", "删除 " + e.name);
+        x.addEventListener("click", () => saveDay(S.sel, dayEntries(S.sel).filter(y => y.id !== e.id)));
+        row.append(nm, gw, k, x);
+        sec.append(row);
+      }
+      box.append(sec);
+    }
+
+    const prev = Object.keys(S.days).filter(k => k < S.sel && dayEntries(k).length).sort().pop();
+    const cp = $("copy-prev");
+    if (prev) {
+      const pd = parseYmd(prev);
+      cp.hidden = false;
+      cp.textContent = `复制 ${pd.getMonth()+1}/${pd.getDate()} 的全部记录（${dayEntries(prev).length} 项）`;
+      cp.onclick = () => saveDay(S.sel, [...dayEntries(S.sel), ...dayEntries(prev).map(e => ({ ...e, id: uid() }))]);
+    } else cp.hidden = true;
+    renderQuick();
+  }
+
+  function renderQuick() {
+    const q = $("quick"); q.textContent = "";
+    for (const f of frequentFoods()) {
+      const b = document.createElement("button");
+      b.textContent = f.name;
+      if (S.pick && S.pick.id === f.id) b.className = "on";
+      b.addEventListener("click", () => pickFood(f));
+      q.append(b);
+    }
+  }
+  function pickFood(f) {
+    S.pick = f;
+    $("food-q").value = f ? f.name : "";
+    $("dropdown").hidden = true;
+    const unit = $("unit");
+    unit.textContent = "";
+    unit.append(new Option("克 g", "g"));
+    if (f && f.serving) unit.append(new Option(`份（${r1(f.serving)}g）`, "serv"));
+    renderQuick(); updatePreview();
+    if (f) $("amt").focus();
+  }
+  function gramsFromInput() {
+    const a = num($("amt").value);
+    if (a == null || a <= 0 || !S.pick) return null;
+    return $("unit").value === "serv" ? a * S.pick.serving : a;
+  }
+  function updatePreview() {
+    const p = $("preview");
+    const grams = gramsFromInput();
+    if (!S.pick) { p.textContent = S.foods.length ? "先选一种食物" : "食物库为空"; $("add-btn").disabled = true; return; }
+    if (grams == null) { p.innerHTML = `<b>${r0(S.pick.kcal)}</b> kcal / 100g`; $("add-btn").disabled = true; return; }
+    p.innerHTML = `${r1(grams)}g → <b>${fmt(entryFrom(S.pick, grams).kcal)}</b> kcal`;
+    $("add-btn").disabled = false;
+  }
+  function addEntry() {
+    const grams = gramsFromInput();
+    if (!S.pick || grams == null) return;
+    const f = S.pick;
+    const per = { kcal: f.kcal, protein: f.protein || 0, fat: f.fat || 0, carbs: f.carbs || 0 };
+    saveDay(S.sel, [...dayEntries(S.sel), { id: uid(), foodId: f.id, name: f.name, meal: $("meal").value, per, ...entryFrom(per, grams) }]);
+    $("amt").value = "";
+    $("amt").blur();
+    pickFood(null);
+  }
+  function renderDropdown() {
+    const raw = $("food-q").value.trim();
+    const q = raw.toLowerCase();
+    const dd = $("dropdown");
+    dd.textContent = "";
+    const list = S.foods.filter(f => !q || f.name.toLowerCase().includes(q) || (f.note || "").toLowerCase().includes(q)).slice(0, 30);
+    if (!list.length) {
+      const e = document.createElement("div"); e.className = "empty";
+      e.textContent = q ? `食物库里没有“${raw}”，去“食物库”添加` : "食物库为空";
+      dd.append(e);
+    }
+    list.forEach((f, i) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      if (i === S.hl) b.className = "hl";
+      const a = document.createElement("span"); a.textContent = f.name;
+      const k = document.createElement("span"); k.className = "num"; k.style.color = "var(--muted)"; k.textContent = r0(f.kcal) + " /100g";
+      b.append(a, k);
+      b.addEventListener("mousedown", (ev) => { ev.preventDefault(); pickFood(f); });
+      b.addEventListener("click", () => pickFood(f));
+      dd.append(b);
+    });
+    dd.hidden = false;
+    return list;
+  }
+
+  // ---------- calendar ----------
+  function renderCal() {
+    const { y, m } = S.month;
+    $("month-label").textContent = `${y}年${m+1}月`;
+    const cal = $("cal"); cal.textContent = "";
+    for (const w of ["一","二","三","四","五","六","日"]) { const d = document.createElement("div"); d.className = "dow"; d.textContent = w; cal.append(d); }
+    const offset = (new Date(y, m, 1).getDay() + 6) % 7;
+    const daysIn = new Date(y, m+1, 0).getDate();
+    for (let i = 0; i < offset; i++) { const c = document.createElement("div"); c.className = "cell pad"; cal.append(c); }
+    let recDays = 0, sum = 0, over = 0;
+    const today = todayStr();
+    for (let dnum = 1; dnum <= daysIn; dnum++) {
+      const key = `${y}-${pad(m+1)}-${pad(dnum)}`;
+      const entries = dayEntries(key);
+      const kcal = entries.length ? totals(entries).kcal : null;
+      const c = document.createElement("button");
+      c.className = "cell";
+      if (key === today) c.classList.add("today");
+      if (key === S.sel) c.classList.add("sel");
+      const dEl = document.createElement("span"); dEl.className = "d"; dEl.textContent = dnum;
+      const vEl = document.createElement("span"); vEl.className = "v";
+      if (kcal != null) {
+        recDays++; sum += kcal;
+        const ratio = S.goal ? kcal / S.goal : 0;
+        if (ratio > 1.1) over++;
+        c.classList.add(ratio > 1.1 ? "over" : ratio >= 0.9 ? "ok" : "under");
+        vEl.textContent = fmt(kcal);
+        const fill = document.createElement("i"); fill.className = "fill";
+        fill.style.height = Math.min(100, ratio * 100) + "%";
+        c.append(fill);
+        c.setAttribute("aria-label", `${m+1}月${dnum}日 ${fmt(kcal)} kcal`);
+      } else c.setAttribute("aria-label", `${m+1}月${dnum}日 无记录`);
+      c.append(dEl, vEl);
+      c.addEventListener("click", () => { S.sel = key; renderDay(); renderCal(); if (window.innerWidth < 880) $("day-panel").scrollIntoView({ behavior: "smooth", block: "start" }); });
+      cal.append(c);
+    }
+    $("st-days").textContent = recDays;
+    $("st-avg").textContent = recDays ? fmt(sum / recDays) : "—";
+    $("st-over").textContent = over;
+  }
+
+  // ---------- food library ----------
+  function sortFoods() { S.foods.sort((a, b) => (a.kind === b.kind ? 0 : a.kind === "natural" ? -1 : 1) || a.name.localeCompare(b.name, "zh")); }
+  function renderFoods() {
+    const q = $("lib-q").value.trim().toLowerCase();
+    const tb = $("ftbody"); tb.textContent = "";
+    $("food-count").textContent = S.foods.length ? `· ${S.foods.length}` : "";
+    $("lib-empty").hidden = S.foods.length > 0;
+    for (const f of S.foods.filter(f => !q || f.name.toLowerCase().includes(q))) {
+      const tr = document.createElement("tr");
+      const td0 = document.createElement("td");
+      td0.textContent = f.name;
+      const tag = document.createElement("span");
+      tag.className = "tag" + (f.kind === "packaged" ? " pk" : "");
+      tag.textContent = f.kind === "packaged" ? "营养表" : "均值";
+      td0.append(tag);
+      if (f.note) { const s = document.createElement("div"); s.style.cssText = "font-size:.76rem;color:var(--muted)"; s.textContent = f.note; td0.append(s); }
+      tr.append(td0);
+      for (const v of [r0(f.kcal), r1(f.protein), r1(f.fat), r1(f.carbs), f.serving ? r1(f.serving) + "g" : "—"]) {
+        const td = document.createElement("td"); td.className = "n"; td.textContent = v; tr.append(td);
+      }
+      tr.addEventListener("click", () => editFood(f));
+      tb.append(tr);
+    }
+  }
+  function setKind(k) { S.form.kind = k; $("k-natural").setAttribute("aria-pressed", k === "natural"); $("k-packaged").setAttribute("aria-pressed", k === "packaged"); }
+  function setEUnit(u) { S.form.eunit = u; $("u-kcal").setAttribute("aria-pressed", u === "kcal"); $("u-kj").setAttribute("aria-pressed", u === "kj"); updateKj(); }
+  function updateKj() {
+    const v = num($("f-energy").value);
+    const box = $("kj-calc");
+    if (S.form.eunit === "kj" && v != null) { box.hidden = false; box.innerHTML = `${v} kJ ÷ 4.184 = <b>${r0(v / 4.184)}</b> kcal`; }
+    else box.hidden = true;
+  }
+  function disarmDel() { const b = $("f-del"); b.classList.remove("armed"); b.textContent = "删除"; b.dataset.armed = ""; }
+  function clearForm() {
+    for (const id of ["f-id","f-name","f-energy","f-p","f-f","f-c","f-serv","f-note"]) $(id).value = "";
+    setKind("natural"); setEUnit("kcal");
+    $("form-title").textContent = "新增食物";
+    $("f-cancel").hidden = true; $("f-del").hidden = true; disarmDel();
+    $("form-msg").textContent = ""; $("form-msg").className = "msg";
+  }
+  function editFood(f) {
+    $("f-id").value = f.id; $("f-name").value = f.name;
+    setKind(f.kind || "natural"); setEUnit("kcal");
+    $("f-energy").value = r1(f.kcal); $("f-p").value = f.protein ?? ""; $("f-f").value = f.fat ?? ""; $("f-c").value = f.carbs ?? "";
+    $("f-serv").value = f.serving ?? ""; $("f-note").value = f.note || "";
+    $("form-title").textContent = "编辑：" + f.name;
+    $("f-cancel").hidden = false; $("f-del").hidden = false; disarmDel();
+    $("form-msg").textContent = "";
+    $("form-title").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  function saveFood(ev) {
+    ev.preventDefault();
+    const msg = $("form-msg");
+    const name = $("f-name").value.trim();
+    const e = num($("f-energy").value);
+    if (!name) { msg.className = "msg err"; msg.textContent = "请填写名称。"; return; }
+    if (e == null || e < 0) { msg.className = "msg err"; msg.textContent = "请填写每 100g 的能量。"; return; }
+    const kcal = S.form.eunit === "kj" ? e / 4.184 : e;
+    const id = $("f-id").value || uid();
+    const existing = S.foods.find(f => f.id === id);
+    const food = {
+      id, name, kind: S.form.kind, kcal: r1(kcal),
+      protein: r1(num($("f-p").value) ?? 0), fat: r1(num($("f-f").value) ?? 0), carbs: r1(num($("f-c").value) ?? 0),
+      serving: num($("f-serv").value) || null, note: $("f-note").value.trim(),
+      createdAt: existing ? existing.createdAt || Date.now() : Date.now(), updatedAt: Date.now(),
+    };
+    const i = S.foods.findIndex(x => x.id === id);
+    if (i >= 0) S.foods[i] = food; else S.foods.push(food);
+    sortFoods(); Store.save();
+    clearForm(); renderFoods(); renderQuick();
+    msg.className = "msg good"; msg.textContent = `已保存“${name}”。`;
+  }
+  function delFood() {
+    const b = $("f-del");
+    if (!b.dataset.armed) { b.dataset.armed = "1"; b.classList.add("armed"); b.textContent = "再点一次确认删除"; return; }
+    const id = $("f-id").value;
+    S.foods = S.foods.filter(f => f.id !== id);
+    if (S.pick && S.pick.id === id) pickFood(null);
+    Store.save();
+    clearForm(); renderFoods(); renderQuick();
+    $("form-msg").textContent = "已删除。过去的记录不受影响。";
+  }
+
+  // ---------- backup ----------
+  async function exportBackup() {
+    const msg = $("backup-msg");
+    const name = `kcal-backup-${todayStr()}.json`;
+    const text = JSON.stringify({ app: "kcal-ledger", version: 1, exportedAt: new Date().toISOString(), foods: S.foods, days: S.days, goal: S.goal }, null, 2);
+    const file = new File([text], name, { type: "application/json" });
+    try {
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: name });
+        msg.className = "msg good"; msg.textContent = "已导出。";
+        return;
+      }
+    } catch (e) {
+      if (e && e.name === "AbortError") return;
+    }
+    const url = URL.createObjectURL(file);
+    const a = document.createElement("a");
+    a.href = url; a.download = name; document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    msg.className = "msg good"; msg.textContent = `已导出 ${name}。`;
+  }
+  function importBackup(file) {
+    const msg = $("backup-msg");
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const d = JSON.parse(reader.result);
+        if (!d || d.app !== "kcal-ledger" || !Array.isArray(d.foods) || typeof d.days !== "object") throw new Error("bad");
+        const byId = Object.fromEntries(S.foods.map(f => [f.id, f]));
+        for (const f of d.foods) if (f && f.id && f.name) byId[f.id] = f;
+        S.foods = Object.values(byId); sortFoods();
+        let n = 0;
+        for (const [k, v] of Object.entries(d.days)) if (/^\d{4}-\d{2}-\d{2}$/.test(k) && v && Array.isArray(v.entries)) { S.days[k] = v; n++; }
+        if (typeof d.goal === "number") S.goal = d.goal;
+        Store.save();
+        renderFoods(); renderDay(); renderCal();
+        msg.className = "msg good"; msg.textContent = `已恢复 ${d.foods.length} 种食物、${n} 天的记录。`;
+      } catch (e) {
+        msg.className = "msg err"; msg.textContent = "这个文件不是热量账本的备份，换一个试试。";
+      }
+      $("import-file").value = "";
+    };
+    reader.readAsText(file);
+  }
+
+  // ---------- wiring ----------
+  function setTab(t) {
+    $("tab-log").setAttribute("aria-selected", t === "log");
+    $("tab-foods").setAttribute("aria-selected", t === "foods");
+    $("view-log").hidden = t !== "log";
+    $("view-foods").hidden = t !== "foods";
+    window.scrollTo(0, 0);
+  }
+  $("tab-log").addEventListener("click", () => setTab("log"));
+  $("tab-foods").addEventListener("click", () => setTab("foods"));
+  function syncMonth() { const d = parseYmd(S.sel); S.month = { y: d.getFullYear(), m: d.getMonth() }; renderDay(); renderCal(); }
+  $("prev-day").addEventListener("click", () => { S.sel = addDays(S.sel, -1); syncMonth(); });
+  $("next-day").addEventListener("click", () => { S.sel = addDays(S.sel, 1); syncMonth(); });
+  $("go-today").addEventListener("click", () => { S.sel = todayStr(); syncMonth(); });
+  $("prev-month").addEventListener("click", () => { let { y, m } = S.month; m--; if (m < 0) { m = 11; y--; } S.month = { y, m }; renderCal(); });
+  $("next-month").addEventListener("click", () => { let { y, m } = S.month; m++; if (m > 11) { m = 0; y++; } S.month = { y, m }; renderCal(); });
+
+  $("goal").addEventListener("change", () => {
+    const g = num($("goal").value);
+    if (g == null || g < 500 || g > 6000) { $("goal").value = S.goal; return; }
+    S.goal = r0(g); Store.save(); renderDay(); renderCal();
+  });
+
+  const fq = $("food-q");
+  fq.addEventListener("focus", () => { S.hl = -1; renderDropdown(); });
+  fq.addEventListener("input", () => { S.pick = null; S.hl = 0; renderDropdown(); updatePreview(); renderQuick(); });
+  fq.addEventListener("blur", () => setTimeout(() => { $("dropdown").hidden = true; }, 150));
+  fq.addEventListener("keydown", (e) => {
+    if (!["ArrowDown","ArrowUp","Enter","Escape"].includes(e.key)) return;
+    const list = renderDropdown();
+    if (e.key === "ArrowDown") { e.preventDefault(); S.hl = Math.min(list.length - 1, S.hl + 1); renderDropdown(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); S.hl = Math.max(0, S.hl - 1); renderDropdown(); }
+    else if (e.key === "Enter") { e.preventDefault(); if (list[S.hl] || list[0]) pickFood(list[S.hl] || list[0]); }
+    else $("dropdown").hidden = true;
+  });
+  $("amt").addEventListener("input", updatePreview);
+  $("amt").addEventListener("keydown", (e) => { if (e.key === "Enter") addEntry(); });
+  $("unit").addEventListener("change", updatePreview);
+  $("add-btn").addEventListener("click", addEntry);
+  $("meal").value = (() => { const h = new Date().getHours(); return h < 11 ? "breakfast" : h < 16 ? "lunch" : h < 21 ? "dinner" : "snack"; })();
+
+  $("lib-q").addEventListener("input", renderFoods);
+  $("food-form").addEventListener("submit", saveFood);
+  $("k-natural").addEventListener("click", () => setKind("natural"));
+  $("k-packaged").addEventListener("click", () => setKind("packaged"));
+  $("u-kcal").addEventListener("click", () => setEUnit("kcal"));
+  $("u-kj").addEventListener("click", () => setEUnit("kj"));
+  $("f-energy").addEventListener("input", updateKj);
+  $("f-cancel").addEventListener("click", clearForm);
+  $("f-del").addEventListener("click", delFood);
+  $("export-btn").addEventListener("click", exportBackup);
+  $("import-file").addEventListener("change", (e) => importBackup(e.target.files && e.target.files[0]));
+
+  // the day can roll over while the app sits in the background
+  let lastToday = todayStr();
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible") return;
+    const t = todayStr();
+    if (t !== lastToday) { if (S.sel === lastToday) S.sel = t; lastToday = t; syncMonth(); }
+  });
+
+  // Safari tab vs home-screen app keep separate storage on iOS
+  const standalone = window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+  if (!standalone && /iPhone|iPad|iPod/.test(navigator.userAgent)) {
+    const n = $("notice"); n.hidden = false;
+    n.textContent = "提示：点 Safari 底部的“分享”→“添加到主屏幕”，以后从桌面图标打开。iPhone 上浏览器里的数据和桌面 app 里的数据是分开存的。";
+  }
+
+  sortFoods();
+  renderDay(); renderCal(); renderFoods();
+
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+  }
+})();
+</script>
+</body>
+</html>
